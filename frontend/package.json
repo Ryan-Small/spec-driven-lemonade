@@ -10,7 +10,9 @@
     "build": "ng build",
     "pretest": "npm run generate:api",
     "test": "ng test",
-    "test:ui": "npm run generate:api && tsc --noEmit -p e2e/tsconfig.json && bddgen && playwright test"
+    "test:ui": "npm run generate:api && tsc --noEmit -p e2e/tsconfig.json && bddgen && playwright test --project=ui",
+    "test:e2e": "npm run generate:api && tsc --noEmit -p e2e/tsconfig.json && E2E=1 bddgen && E2E=1 playwright test --project=e2e --pass-with-no-tests",
+    "test:mutation": "stryker run"
   },
   "private": true,
   "packageManager": "npm@11.12.1",
@@ -30,6 +32,7 @@
     "@angular/compiler-cli": "^21.2.0",
     "@openapitools/openapi-generator-cli": "^2.42.2",
     "@playwright/test": "^1.65.1",
+    "@stryker-mutator/core": "^10.1.1",
     "@types/node": "^26.6.6",
     "fast-check": "^4.10.2",
     "jsdom": "^28.0.0",

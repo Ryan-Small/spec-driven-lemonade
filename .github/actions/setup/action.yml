@@ -1,0 +1,30 @@
+name: Set up Java and Node
+description: Installs Amazon Corretto 21, Gradle caching, Node 24, and the frontend packages.
+
+inputs:
+  browsers:
+    description: Set to "true" to install the Chromium test browser for Playwright.
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-java@v6
+      with:
+        distribution: corretto
+        java-version: "21"
+    - uses: gradle/actions/setup-gradle@v6
+    - uses: actions/setup-node@v7
+      with:
+        node-version: "24"
+        cache: npm
+        cache-dependency-path: frontend/package-lock.json
+    - name: Install frontend packages
+      shell: bash
+      working-directory: frontend
+      run: npm ci
+    - name: Install the test browser
+      if: inputs.browsers == 'true'
+      shell: bash
+      working-directory: frontend
+      run: npx playwright install --with-deps chromium

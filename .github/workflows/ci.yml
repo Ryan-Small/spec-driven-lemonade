@@ -1,0 +1,178 @@
+name: CI
+
+# The real gate. Local hooks are a guardrail that an agent can remove. These jobs, made
+# required by branch protection, are what a change must pass to reach main.
+# Order: cheapest first. A job runs only if the jobs before it did not fail.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: 1 Gate
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Locked paths need the spec-change label
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+        run: |
+          # Use the gate script of the base commit when it exists, so a pull request cannot
+          # weaken the gate that judges it.
+          if git show "$BASE_SHA:tools/ci/gate.mjs" > "$RUNNER_TEMP/gate.mjs" 2>/dev/null; then
+            node "$RUNNER_TEMP/gate.mjs"
+          else
+            node tools/ci/gate.mjs
+          fi
+
+  contract:
+    name: 2 Contract
+    needs: gate
+    if: ${{ !failure() && !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/setup
+      - name: Install oasdiff
+        run: curl -fsSL https://raw.githubusercontent.com/oasdiff/oasdiff/main/install.sh | sh
+      - name: The backend matches the locked contract
+        run: tools/contract-check.sh
+      - name: Report breaking changes of the locked contract
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if git show "$BASE_SHA:contracts/openapi.yaml" > "$RUNNER_TEMP/base-contract.yaml" 2>/dev/null; then
+            {
+              echo "### Contract: breaking changes against the base branch"
+              echo '```'
+              oasdiff breaking "$RUNNER_TEMP/base-contract.yaml" contracts/openapi.yaml || true
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  build:
+    name: 3 Build
+    needs: contract
+    if: ${{ !failure() && !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - name: Build the backend
+        working-directory: backend
+        run: ./gradlew assemble testClasses
+      - name: Build the frontend against the generated client
+        working-directory: frontend
+        run: npm run build
+
+  unit:
+    name: 4 Unit and property tests
+    needs: build
+    if: ${{ !failure() && !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - name: Backend unit and property tests
+        working-directory: backend
+        run: ./gradlew test
+      - name: Frontend unit and property tests
+        working-directory: frontend
+        run: npm test -- --watch=false
+
+  acceptance-api:
+    name: 5a Acceptance @api
+    needs: unit
+    if: ${{ !failure() && !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - name: Run the @api scenarios
+        working-directory: backend
+        run: ./gradlew acceptanceTest
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: cucumber-api
+          path: reports/cucumber-api.ndjson
+
+  acceptance-ui:
+    name: 5b Acceptance @ui
+    needs: unit
+    if: ${{ !failure() && !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+        with:
+          browsers: "true"
+      - name: Run the @ui scenarios
+        working-directory: frontend
+        run: npm run test:ui
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: cucumber-ui
+          path: reports/cucumber-ui.ndjson
+
+  fail-first:
+    name: 6 Fail-first
+    needs: unit
+    if: ${{ github.event_name == 'pull_request' && !failure() && !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/setup
+        with:
+          browsers: "true"
+      - name: New and changed scenarios fail on the base commit
+        run: tools/ci/fail-first-run.sh "${{ github.event.pull_request.base.sha }}"
+
+  mutation:
+    name: 7 Mutation tests on changed files
+    needs: unit
+    if: ${{ github.event_name == 'pull_request' && !failure() && !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/setup
+      - name: PIT and StrykerJS on the changed files
+        run: tools/ci/mutation-changed.sh "${{ github.event.pull_request.base.sha }}"
+
+  trace:
+    name: 8 Traceability
+    needs: [acceptance-api, acceptance-ui]
+    if: ${{ !failure() && !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          path: reports
+          merge-multiple: true
+      - name: Every implemented requirement has passing scenarios
+        run: node tools/trace-check/trace-check.mjs --layers=api,ui | tee -a "$GITHUB_STEP_SUMMARY"
+        shell: bash -eo pipefail {0}

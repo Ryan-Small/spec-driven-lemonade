@@ -80,8 +80,12 @@ openApi {
 pitest {
     pitestVersion = "1.30.2"
     junit5PluginVersion = "1.2.3"
-    targetClasses = setOf("com.lemonade.domain.*", "com.lemonade.service.*")
+    // CI passes -PpitTargetClasses=<classes of the changed files>. The default is everything.
+    targetClasses = (findProperty("pitTargetClasses") as String?)?.split(",")?.toSet()
+        ?: setOf("com.lemonade.domain.*", "com.lemonade.service.*")
     targetTests = setOf("com.lemonade.domain.*", "com.lemonade.service.*")
     outputFormats = setOf("HTML", "XML")
     timestampedReports = false
+    mutationThreshold = 80
+    failWhenNoMutations = false
 }

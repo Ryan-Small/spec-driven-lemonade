@@ -180,3 +180,58 @@ One requirement through every layer: spec → failing acceptance test → backen
 - **Mutation testing caught a weak unit test that I wrote.** PIT replaced `SystemSeedSource.nextSeed()` with `return 0`, and the tests still passed, because my test checked only the range of the seed. No other layer saw this: the acceptance tests passed, the trace-check passed. The fix was a test that also requires distinct seeds.
 - **The locked-path hook fired for real.** It blocked a shell command of mine that named the unlock file.
 - **Six assumptions were needed for one small requirement.** They are in `implementation-notes/REQ-001-start-game.md`. The largest is the API shape itself.
+
+## Phase 4 — CI pipeline
+
+CI is the only layer the agent cannot switch off from inside a session. Everything before it (CLAUDE.md, rules, hooks) can be misread, bypassed or edited. A required CI job on a protected branch cannot.
+
+### `.github/workflows/ci.yml`
+
+- **What it does:** Runs nine jobs on every pull request, cheapest first. A job starts only if the jobs before it did not fail, so a change that fails the 10-second gate never spends minutes on tests.
+- **Failure it prevents:** Each job owns one failure. See the table below.
+- **Without it:** Every guardrail in this repo is advisory.
+
+| Job | Fails when | The quiet failure it catches |
+|---|---|---|
+| 1 Gate | A locked path changed and the PR has no `spec-change` label | The agent edits the spec, the contract, a workflow, a hook or a CI script to fit its code |
+| 2 Contract | The API of the code differs from `contracts/openapi.yaml` | A renamed or removed API field |
+| 3 Build | Either side does not compile, including the frontend against the generated client | A contract change that the frontend was not updated for |
+| 4 Unit and property tests | A fast test fails | Ordinary regressions |
+| 5a, 5b Acceptance | An `@api` or `@ui` scenario of an implemented requirement fails | Behavior that no longer matches the spec |
+| 6 Fail-first | A new or changed scenario passes on the base commit | A test that cannot fail, for example a weakened step definition |
+| 7 Mutation | Under 80% of mutants in the changed files are killed | Unit tests that run the code and assert nothing |
+| 8 Traceability | A scenario of an implemented requirement has no passing run | A scenario that silently stopped running |
+
+### `tools/ci/gate.mjs`
+
+- **What it does:** Lists the files a pull request changes. If one is under `spec/`, `contracts/`, `.github/workflows/`, `.claude/` or `tools/`, the pull request needs the `spec-change` label. The pending-requirements list may lose lines freely and may gain a line only with the label.
+- **Failure it prevents:** A spec change that nobody decided. A solo developer cannot approve their own pull request, so the label stands in for a second reviewer: setting it is the owner's explicit "I decided this".
+- **Without it:** The local hook is the only lock, and the agent can remove the local hook.
+- **Detail:** The workflow runs the gate script of the base commit, not the one in the pull request. A pull request cannot weaken the gate that judges it.
+- **Limit:** GitHub runs the workflow file of the pull request itself. A pull request that rewrites `ci.yml` to drop the gate job still shows a changed locked path only if the gate job runs. Branch protection closes this: it requires a check named "1 Gate", and a removed job reports no check.
+
+### `tools/ci/fail-first-run.sh` and `tools/ci/fail-first.mjs`
+
+- **What it does:** Builds the production code of the base commit together with the tests and spec of the pull request, runs the acceptance tiers there, and fails if a new or changed scenario passes.
+- **Failure it prevents:** A scenario that passes with or without the change. Such a scenario is decoration. The common cause is a step definition that asserts nothing, or asserts a value it read back from the system.
+- **Without it:** "The new acceptance test passes" is accepted as proof, and nobody checks that the test can fail.
+- **Tested locally with two simulations:** with the REQ-001 code absent on the base, all 3 scenarios failed there and the check passed. With the code already present on the base, the check failed with "3 scenario(s) pass without the change".
+
+### `tools/ci/mutation-changed.sh`, the `pitest` block in `backend/build.gradle.kts`, `frontend/stryker.config.json`
+
+- **What it does:** Mutation testing changes the production code in small ways (flip a condition, return 0) and reruns the unit tests. A mutant that no test notices "survives". On a pull request only the changed files are mutated, to keep the job short.
+- **Failure it prevents:** Weak unit tests. The agent may change unit tests freely, so something has to check that they still test. Coverage does not: a test with no assertion gives 100% coverage.
+- **Without it:** The freedom to edit unit tests becomes the freedom to hollow them out.
+- **Seen in Phase 3:** PIT caught a seed test of mine that checked only a range.
+
+### `.github/workflows/nightly.yml`
+
+- **What it does:** Job 9. Runs all three acceptance layers, including `@e2e` against the real backend, then the traceability check over all layers, and full mutation runs. It runs after each merge to main, every night, and on demand.
+- **Failure it prevents:** A break that only the slow checks see: the two sides pass alone and fail together.
+- **Without it:** The slow checks either run on every pull request (slow feedback) or never.
+
+### `.github/actions/setup/action.yml`
+
+- **What it does:** One shared setup step: Amazon Corretto 21, Gradle cache, Node 24, `npm ci`, and the test browser on request.
+- **Failure it prevents:** Eight copies of the same setup that drift apart, for example one job on a different Java version.
+- **Without it:** A version bump needs eight edits, and one gets missed.

@@ -1,0 +1,48 @@
+name: Nightly
+
+# Job 9: the slow checks. They run on main after each merge, every night, and on demand.
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  full-acceptance:
+    name: 9a All layers with @e2e, then traceability
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+        with:
+          browsers: "true"
+      - name: Run the @api scenarios
+        working-directory: backend
+        run: ./gradlew acceptanceTest
+      - name: Run the @ui scenarios
+        working-directory: frontend
+        run: npm run test:ui
+      - name: Run the @e2e scenarios against the real backend
+        working-directory: frontend
+        run: npm run test:e2e
+      - name: Every implemented requirement has passing scenarios in every layer
+        run: node tools/trace-check/trace-check.mjs | tee -a "$GITHUB_STEP_SUMMARY"
+        shell: bash -eo pipefail {0}
+
+  full-mutation:
+    name: 9b Full mutation tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - name: PIT on the domain and service packages
+        working-directory: backend
+        run: ./gradlew pitest
+      - name: StrykerJS on the frontend
+        working-directory: frontend
+        run: npm run generate:api && npm run test:mutation
