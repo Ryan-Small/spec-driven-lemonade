@@ -1,0 +1,74 @@
+openapi: 3.1.0
+info:
+  title: Lemonade Stand API
+  version: "1"
+servers:
+- url: http://localhost:8080
+  description: Generated server url
+paths:
+  /api/games:
+    post:
+      tags:
+      - games
+      summary: Start a new game
+      operationId: startGame
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GameResponse"
+components:
+  schemas:
+    GameResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum:
+          - IN_PROGRESS
+        day:
+          type: integer
+          format: int32
+        totalDays:
+          type: integer
+          format: int32
+        cashCents:
+          type: integer
+          format: int32
+        inventory:
+          $ref: "#/components/schemas/InventoryResponse"
+        seed:
+          type: integer
+          format: int64
+      required:
+      - cashCents
+      - day
+      - id
+      - inventory
+      - seed
+      - status
+      - totalDays
+    InventoryResponse:
+      type: object
+      properties:
+        lemons:
+          type: integer
+          format: int32
+        sugar:
+          type: integer
+          format: int32
+        cups:
+          type: integer
+          format: int32
+        ice:
+          type: integer
+          format: int32
+      required:
+      - cups
+      - ice
+      - lemons
+      - sugar

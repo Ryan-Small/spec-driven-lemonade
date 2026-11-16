@@ -1,0 +1,9 @@
+<main>
+  <h1>Lemonade Stand</h1>
+  @if (game(); as game) {
+    <p>Day {{ game.day }} of {{ game.totalDays }}</p>
+    <p>Cash: <span data-testid="cash">{{ formatCents(game.cashCents) }}</span></p>
+  } @else {
+    <button type="button" (click)="startGame()">Start new game</button>
+  }
+</main>

@@ -1,0 +1,32 @@
+# OS and editors
+.DS_Store
+.idea/
+.vscode/
+
+# Claude Code: personal settings stay local
+.claude/settings.local.json
+
+# Owner-only switch that lifts the locked-path hook. Never commit it.
+.claude/spec-unlock
+
+# Backend (Gradle)
+.gradle/
+build/
+
+# Frontend (Angular, Playwright, Stryker)
+node_modules/
+dist/
+.angular/
+test-results/
+playwright-report/
+.features-gen/
+.stryker-tmp/
+
+# Generated from contracts/openapi.yaml by "npm run generate:api"
+frontend/src/app/api/
+
+# Test reports that trace-check reads
+reports/
+
+# jqwik local run history
+.jqwik-database
